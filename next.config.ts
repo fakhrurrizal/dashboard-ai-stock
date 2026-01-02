@@ -1,9 +1,25 @@
-import type { NextConfig } from "next";
+/** @type {import('next').NextConfig} */
 
-const nextConfig: NextConfig = {
-  /* config options here */
-  reactCompiler: true,
-  reactStrictMode: true,
-};
+const nextConfig = () => {
+    return {
+        reactStrictMode: false,
 
-export default nextConfig;
+        modularizeImports: {
+            '@mui/material': {
+                transform: '@mui/material/{{member}}',
+            },
+
+            '@mui/icons-material': {
+                transform: '@mui/icons-material/{{member}}',
+            },
+        },
+
+        // eslint: {
+        //   ignoreDuringBuilds: true,
+        // },
+
+  
+  }
+}
+
+module.exports = nextConfig
