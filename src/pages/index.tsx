@@ -14,8 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import { ToastContainer, toast } from "react-toastify";
-import "react-toastify/dist/ReactToastify.css";
+import toast from 'react-hot-toast';
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
 
@@ -113,7 +112,7 @@ export default function Dashboard() {
   };
 
   const handleUploadAndTrain = async () => {
-    if (!selectedFile) return toast.warn("Pilih file CSV");
+    if (!selectedFile) return toast.error("Pilih file CSV");
     setIsUploading(true);
     setUploadProgress(0);
     setTrainingStatus("Inisialisasi...");
@@ -192,7 +191,6 @@ export default function Dashboard() {
         <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-orange-200/30 to-pink-200/30 rounded-full blur-3xl animate-pulse delay-1000"></div>
       </div>
 
-      <ToastContainer position="top-right" theme="light" />
 
       <div className="relative z-10 flex flex-col items-center mt-16 mb-16 text-center">
         <h1 className="text-6xl font-black bg-gradient-to-r from-gray-900 via-blue-800 to-purple-900 bg-clip-text text-transparent mb-4 flex items-center gap-4">

@@ -1,19 +1,42 @@
-import { ReactNode } from 'react'
-
-import { ToastContainer } from 'react-toastify'
-
-import 'react-toastify/dist/ReactToastify.css'
+import { ReactNode } from "react";
+import { Toaster } from "react-hot-toast";
 
 interface ToastProviderProps {
-    children: ReactNode
+  children: ReactNode;
 }
 
-export const ToastProvider: React.FC<ToastProviderProps> = ({ children }) => {
-    return (
-        <>
-            {children}
+export const ToastProvider = ({ children }: ToastProviderProps) => {
+  return (
+    <>
+      {children}
+      <Toaster
+        position="top-center"
+        reverseOrder={false}
+        toastOptions={{
+          duration: 3000,
+          style: {
+            background: "#363636",
+            color: "#fff",
+          },
+          success: {
+            duration: 3000,
 
-            <ToastContainer />
-        </>
-    )
-}
+            style: {
+              color: "green",
+              background: "#ffff",
+            },
+          },
+          error: {
+            duration: 3000,
+            style: {
+              color: "red",
+              background: "#ffff",
+            },
+          },
+
+          
+        }}
+      />
+    </>
+  );
+};
