@@ -6,15 +6,18 @@ import {
   CloudUpload,
   Database,
   FileText,
+  Info,
   Loader2,
   MessageCircle,
   Send,
   Sparkles,
   Trash2,
   X,
+  Target,
+  Zap,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
-import toast from 'react-hot-toast';
+import toast from "react-hot-toast";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
 
@@ -62,10 +65,31 @@ interface ChatResponse {
   status: string;
 }
 
+interface GlobalStatus {
+  is_trained: boolean;
+  total_sku: number;
+  last_status: string;
+  model_info: {
+    selected_model: string | null;
+    order: string;
+    seasonal_order: string | null;
+  };
+  global_evaluation: {
+    mae?: number;
+    rmse?: number;
+    mape?: string;
+  };
+  summary: {
+    success: number;
+    failed: number;
+  };
+}
+
 export default function Dashboard() {
   const [openUpload, setOpenUpload] = useState(false);
   const [openChat, setOpenChat] = useState(false);
   const [openResetDialog, setOpenResetDialog] = useState(false);
+  const [openModelInfo, setOpenModelInfo] = useState(false);
   const [chatHistory, setChatHistory] = useState<ChatItem[]>([]);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [trainingStatus, setTrainingStatus] = useState("");
@@ -76,13 +100,15 @@ export default function Dashboard() {
   const [modelType, setModelType] = useState("SARIMA");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [chatInput, setChatInput] = useState("");
+  const [serverStatus, setServerStatus] = useState<GlobalStatus | null>(null);
 
   const checkServerStatus = useCallback(async () => {
     try {
-      const res = await axios.get<{ is_trained: boolean }>(
+      const res = await axios.get<GlobalStatus>(
         `${API_BASE}/check-status?t=${Date.now()}`
       );
       setTrained(!!res.data.is_trained);
+      setServerStatus(res.data);
     } catch {
       console.log("Backend offline");
     }
@@ -101,6 +127,7 @@ export default function Dashboard() {
     try {
       await axios.delete(`${API_BASE}/reset-data`);
       setTrained(false);
+      setServerStatus(null);
       setChatHistory([]);
       toast.success("Data berhasil dihapus");
       setOpenResetDialog(false);
@@ -133,6 +160,7 @@ export default function Dashboard() {
           eventSource.close();
           setTrained(true);
           setIsUploading(false);
+          checkServerStatus();
           toast.success("Training Selesai!");
           setTimeout(() => setOpenUpload(false), 1000);
         }
@@ -191,7 +219,6 @@ export default function Dashboard() {
         <div className="absolute -bottom-40 -left-40 w-96 h-96 bg-gradient-to-tr from-orange-200/30 to-pink-200/30 rounded-full blur-3xl animate-pulse delay-1000"></div>
       </div>
 
-
       <div className="relative z-10 flex flex-col items-center mt-16 mb-16 text-center">
         <h1 className="text-6xl font-black bg-gradient-to-r from-gray-900 via-blue-800 to-purple-900 bg-clip-text text-transparent mb-4 flex items-center gap-4">
           AI Stock Service
@@ -247,15 +274,21 @@ export default function Dashboard() {
               </div>
 
               {isTrained && (
-                <div className="mt-6 inline-flex items-center gap-2 text-green-600 text-sm font-bold border-2 border-green-300 bg-green-50 px-5 py-2 rounded-full shadow-sm">
+                <div
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setOpenModelInfo(true);
+                  }}
+                  className="mt-6 inline-flex items-center gap-2 text-green-600 text-sm font-bold border-2 border-green-300 bg-green-50 px-5 py-2 rounded-full shadow-sm hover:bg-green-100 transition-colors cursor-help"
+                >
                   <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
                   Model Terlatih
+                  <Info size={14} className="ml-1 opacity-70" />
                 </div>
               )}
             </div>
           </div>
 
-          {/* Chat Card */}
           <div
             onClick={() => isTrained && setOpenChat(true)}
             className={`group relative bg-white/80 backdrop-blur-sm rounded-3xl p-12 shadow-2xl border border-white/50 text-center transition-all duration-500 ${
@@ -288,7 +321,6 @@ export default function Dashboard() {
         </div>
       </div>
 
-      {/* Reset Confirmation Dialog */}
       {openResetDialog && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-3xl max-w-md w-full p-8 shadow-2xl animate-in zoom-in duration-300">
@@ -344,7 +376,146 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Modal Upload */}
+      {openModelInfo && serverStatus && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-[60] p-4 animate-in fade-in duration-300">
+          <div className="bg-white rounded-[2.5rem] max-w-2xl w-full shadow-2xl overflow-hidden animate-in zoom-in duration-300 border border-gray-100">
+            <div className="p-8 bg-gradient-to-r from-green-600 to-teal-600 flex justify-between items-center">
+              <div className="flex items-center gap-4 text-white">
+                <div className="p-3 bg-white/20 rounded-2xl">
+                  <Zap size={28} />
+                </div>
+                <div>
+                  <h3 className="text-2xl font-black">Detail Model AI</h3>
+                  <p className="text-green-50 opacity-80 text-sm font-medium">
+                    Informasi performa dan arsitektur
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setOpenModelInfo(false)}
+                className="p-2 bg-white/10 hover:bg-white/20 text-white rounded-xl transition-all"
+              >
+                <X size={24} />
+              </button>
+            </div>
+
+            <div className="p-10 space-y-8">
+              <div className="grid grid-cols-2 gap-6">
+                <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
+                  <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">
+                    Arsitektur Terpilih
+                  </p>
+                  <div className="flex items-end gap-2">
+                    <span className="text-4xl font-black text-slate-800">
+                      {serverStatus.model_info.selected_model}
+                    </span>
+                    <span className="text-slate-400 font-bold mb-1">Model</span>
+                  </div>
+                  <div className="mt-4 flex flex-col gap-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500 font-medium">Order:</span>
+                      <span className="text-slate-800 font-bold">
+                        {serverStatus.model_info.order}
+                      </span>
+                    </div>
+                    {serverStatus.model_info.seasonal_order && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-500 font-medium">
+                          Seasonal:
+                        </span>
+                        <span className="text-slate-800 font-bold">
+                          {serverStatus.model_info.seasonal_order}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100">
+                  <p className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">
+                    Cakupan Data
+                  </p>
+                  <div className="flex items-end gap-2">
+                    <span className="text-4xl font-black text-blue-800">
+                      {serverStatus.summary.success}
+                    </span>
+                    <span className="text-blue-400 font-bold mb-1">SKU</span>
+                  </div>
+                  <div className="mt-4 space-y-2">
+                    <div className="h-2 bg-blue-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 rounded-full"
+                        style={{
+                          width: `${
+                            (serverStatus.summary.success /
+                              serverStatus.total_sku) *
+                            100
+                          }%`,
+                        }}
+                      ></div>
+                    </div>
+                    <p className="text-[10px] text-blue-500 font-bold text-right uppercase">
+                      Training Success Rate
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                  <Target size={14} /> Evaluasi Akurasi Global
+                </p>
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    {
+                      label: "MAE",
+                      value: serverStatus.global_evaluation.mae,
+                      desc: "Mean Abs Error",
+                    },
+                    {
+                      label: "RMSE",
+                      value: serverStatus.global_evaluation.rmse,
+                      desc: "Root Mean Sq Error",
+                    },
+                    {
+                      label: "MAPE",
+                      value: serverStatus.global_evaluation.mape,
+                      desc: "Mean Abs % Error",
+                    },
+                  ].map((stat, i) => (
+                    <div
+                      key={i}
+                      className="text-center p-5 bg-white border-2 border-slate-50 rounded-3xl shadow-sm"
+                    >
+                      <p className="text-[10px] font-black text-slate-400 mb-1">
+                        {stat.label}
+                      </p>
+                      <p className="text-xl font-black text-slate-800">
+                        {stat.value ?? "N/A"}
+                      </p>
+                      <p className="text-[9px] text-slate-400 font-bold mt-1 uppercase">
+                        {stat.desc}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-orange-50 p-5 rounded-2xl flex items-start gap-4 border border-orange-100">
+                <div className="p-2 bg-orange-100 rounded-lg text-orange-600 mt-1">
+                  <Sparkles size={18} />
+                </div>
+                <p className="text-xs text-orange-800 font-medium leading-relaxed">
+                  Model ini dilatih secara individual untuk setiap SKU guna
+                  menangkap pola musiman dan tren unik setiap produk. Akurasi
+                  dihitung berdasarkan <b>validation set</b> terakhir.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {openUpload && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-3xl max-w-lg w-full p-10 shadow-2xl animate-in zoom-in duration-300">
@@ -442,7 +613,6 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Chat Interface */}
       {openChat && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-lg flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-3xl max-w-6xl w-full h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in duration-300">
