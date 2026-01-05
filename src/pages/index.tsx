@@ -283,7 +283,7 @@ export default function Dashboard() {
       <div className="relative z-10 flex-1 flex items-center justify-center">
         <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-10">
           <div
-            onClick={() => !isUploading && setOpenUpload(true)}
+            onClick={() => setOpenUpload(true)}
             className={`group relative bg-white/80 backdrop-blur-sm rounded-3xl p-12 shadow-2xl border border-white/50 text-center cursor-pointer transition-all duration-500 hover:scale-105 hover:shadow-orange-200/50 ${
               isUploading ? "opacity-50" : ""
             }`}
@@ -590,6 +590,40 @@ export default function Dashboard() {
                 <p className="text-xs text-gray-400 mt-4 animate-pulse italic">
                   Sedang melanjutkan proses di server...
                 </p>
+              </div>
+            ) : isTrained ? (
+              <div className="py-6 text-center space-y-6">
+                <div className="bg-green-50 border-2 border-green-100 p-8 rounded-[2.5rem] flex flex-col items-center gap-4 shadow-inner">
+                  <div className="bg-white p-4 rounded-full shadow-md text-green-500">
+                    <Zap size={40} fill="currentColor" />
+                  </div>
+                  <div className="space-y-2">
+                    <h4 className="text-xl font-black text-green-800 uppercase tracking-tight">
+                      Model Sudah Aktif
+                    </h4>
+                    <p className="text-sm text-green-700 font-semibold leading-relaxed max-w-[280px] mx-auto">
+                      AI saat ini sudah terlatih menggunakan dataset sebelumnya.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="bg-slate-50 p-6 rounded-2xl flex items-start gap-4 border border-slate-100 text-left">
+                  <div className="p-2 bg-blue-100 rounded-xl text-blue-600 mt-0.5 shadow-sm">
+                    <Info size={18} />
+                  </div>
+                  <p className="text-xs text-slate-600 font-bold leading-relaxed">
+                    Jika ingin menggunakan dataset baru, silakan gunakan tombol{" "}
+                    <span className="text-red-500">{"Reset Data"}</span> di
+                    halaman utama terlebih dahulu untuk membersihkan model lama.
+                  </p>
+                </div>
+
+                <button
+                  onClick={() => setOpenUpload(false)}
+                  className="w-full py-5 bg-gradient-to-r from-slate-800 to-gray-900 text-white rounded-2xl font-black text-lg shadow-xl shadow-gray-200 hover:scale-[1.02] transition-all duration-300"
+                >
+                  TUTUP JENDELA
+                </button>
               </div>
             ) : (
               <div className="space-y-6">
