@@ -16,7 +16,7 @@ import {
   Target,
   Zap,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, useRef } from "react";
 import toast from "react-hot-toast";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
@@ -102,20 +102,70 @@ export default function Dashboard() {
   const [chatInput, setChatInput] = useState("");
   const [serverStatus, setServerStatus] = useState<GlobalStatus | null>(null);
 
+  const eventSourceRef = useRef<EventSource | null>(null);
+
+  const reconnectProgressStream = useCallback(() => {
+    if (eventSourceRef.current) {
+      eventSourceRef.current.close();
+    }
+
+    const eventSource = new EventSource(`${API_BASE}/train-progress`);
+    eventSourceRef.current = eventSource;
+
+    eventSource.onmessage = (event) => {
+      const result = JSON.parse(event.data);
+      setUploadProgress(result.percent);
+      setTrainingStatus(result.status);
+
+      if (result.percent >= 100) {
+        eventSource.close();
+        setTrained(true);
+        setIsUploading(false);
+        checkServerStatus();
+        toast.success("Training Selesai!");
+        setTimeout(() => setOpenUpload(false), 1500);
+      }
+    };
+
+    eventSource.onerror = () => {
+      eventSource.close();
+    };
+  }, []);
+
   const checkServerStatus = useCallback(async () => {
     try {
       const res = await axios.get<GlobalStatus>(
         `${API_BASE}/check-status?t=${Date.now()}`
       );
-      setTrained(!!res.data.is_trained);
-      setServerStatus(res.data);
+
+      const statusData = res.data;
+      setTrained(!!statusData.is_trained);
+      setServerStatus(statusData);
+
+      const isStillTraining =
+        !statusData.is_trained &&
+        statusData.last_status !== "Belum ada data" &&
+        statusData.last_status !== "Selesai" &&
+        statusData.last_status !== "";
+
+      if (isStillTraining) {
+        setOpenUpload(true);
+        setIsUploading(true);
+        setTrainingStatus(statusData.last_status);
+        reconnectProgressStream();
+      }
     } catch {
       console.log("Backend offline");
     }
-  }, []);
+  }, [reconnectProgressStream]);
 
   useEffect(() => {
     checkServerStatus();
+    return () => {
+      if (eventSourceRef.current) {
+        eventSourceRef.current.close();
+      }
+    };
   }, [checkServerStatus]);
 
   const handleResetClick = () => {
@@ -148,29 +198,14 @@ export default function Dashboard() {
     formData.append("file", selectedFile);
 
     try {
-      const eventSource = new EventSource(`${API_BASE}/train-progress`);
-      eventSource.onmessage = (event) => {
-        const result = JSON.parse(event.data) as {
-          percent: number;
-          status: string;
-        };
-        setUploadProgress(result.percent);
-        setTrainingStatus(result.status);
-        if (result.percent >= 100) {
-          eventSource.close();
-          setTrained(true);
-          setIsUploading(false);
-          checkServerStatus();
-          toast.success("Training Selesai!");
-          setTimeout(() => setOpenUpload(false), 1000);
-        }
-      };
+      reconnectProgressStream();
       await axios.post(
         `${API_BASE}/upload-train?model_type=${modelType}`,
         formData
       );
     } catch {
       setIsUploading(false);
+      if (eventSourceRef.current) eventSourceRef.current.close();
       toast.error("Gagal training");
     }
   };
@@ -551,6 +586,9 @@ export default function Dashboard() {
                 </div>
                 <p className="font-bold text-orange-600 text-lg">
                   {trainingStatus}
+                </p>
+                <p className="text-xs text-gray-400 mt-4 animate-pulse italic">
+                  Sedang melanjutkan proses di server...
                 </p>
               </div>
             ) : (
