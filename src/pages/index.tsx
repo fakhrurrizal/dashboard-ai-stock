@@ -15,6 +15,7 @@ import {
   X,
   Target,
   Zap,
+  Square,
 } from "lucide-react";
 import { useCallback, useEffect, useState, useRef } from "react";
 import toast from "react-hot-toast";
@@ -96,6 +97,7 @@ export default function Dashboard() {
   const [isUploading, setIsUploading] = useState(false);
   const [isSendingChat, setIsSendingChat] = useState(false);
   const [isResetting, setIsResetting] = useState(false);
+  const [isStopping, setIsStopping] = useState(false);
   const [isTrained, setTrained] = useState(false);
   const [modelType, setModelType] = useState("SARIMA");
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -125,6 +127,13 @@ export default function Dashboard() {
         toast.success("Training Selesai!");
         setTimeout(() => setOpenUpload(false), 1500);
       }
+
+      if (result.status === "Training dihentikan") {
+        eventSource.close();
+        setIsUploading(false);
+        setTrained(false);
+        setOpenUpload(false);
+      }
     };
 
     eventSource.onerror = () => {
@@ -147,6 +156,7 @@ export default function Dashboard() {
         !statusData.is_trained &&
         statusLower !== "belum ada data" &&
         statusLower !== "selesai" &&
+        statusLower !== "training dihentikan" &&
         statusLower !== "" &&
         statusData.total_sku >= 0;
 
@@ -187,6 +197,19 @@ export default function Dashboard() {
       toast.error("Gagal menghapus data");
     } finally {
       setIsResetting(false);
+    }
+  };
+
+  const handleStopTraining = async () => {
+    if (isStopping) return;
+    setIsStopping(true);
+    try {
+      await axios.post(`${API_BASE}/stop-training`);
+      toast.success("Permintaan penghentian dikirim");
+    } catch {
+      toast.error("Gagal menghentikan training");
+    } finally {
+      setIsStopping(false);
     }
   };
 
@@ -589,9 +612,21 @@ export default function Dashboard() {
                 <p className="font-bold text-orange-600 text-lg">
                   {trainingStatus}
                 </p>
-                <p className="text-xs text-gray-400 mt-4 animate-pulse italic">
+                <p className="text-xs text-gray-400 mt-4 animate-pulse italic mb-8">
                   Sedang melanjutkan proses di server...
                 </p>
+                <button
+                  onClick={handleStopTraining}
+                  disabled={isStopping}
+                  className="flex items-center gap-2 mx-auto px-6 py-3 bg-red-50 text-red-600 rounded-2xl font-bold hover:bg-red-600 hover:text-white transition-all duration-300 border border-red-100 disabled:opacity-50"
+                >
+                  {isStopping ? (
+                    <Loader2 size={18} className="animate-spin" />
+                  ) : (
+                    <Square size={18} fill="currentColor" />
+                  )}
+                  {isStopping ? "MENGHENTIKAN..." : "STOP TRAINING"}
+                </button>
               </div>
             ) : isTrained ? (
               <div className="py-6 text-center space-y-6">
@@ -611,7 +646,9 @@ export default function Dashboard() {
 
                 <div className="bg-slate-50 p-6 rounded-2xl flex items-start gap-4 border border-slate-100 text-left">
                   <div className="p-2 bg-blue-100 rounded-xl text-blue-600 mt-0.5 shadow-sm">
-                    <Info size={18} />
+                    <span className="p-2 bg-blue-100 rounded-xl text-blue-600 mt-0.5 shadow-sm">
+                      <Info size={18} />
+                    </span>
                   </div>
                   <p className="text-xs text-slate-600 font-bold leading-relaxed">
                     Jika ingin menggunakan dataset baru, silakan gunakan tombol{" "}
