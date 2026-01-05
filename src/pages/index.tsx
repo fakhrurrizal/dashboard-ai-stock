@@ -10,14 +10,12 @@ import {
   Loader2,
   MessageCircle,
   Send,
-  Sparkles,
+  Square,
   Trash2,
   X,
-  Target,
   Zap,
-  Square,
 } from "lucide-react";
-import { useCallback, useEffect, useState, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 
 const API_BASE = process.env.NEXT_PUBLIC_API_BASE;
@@ -68,6 +66,7 @@ interface ChatResponse {
 
 interface GlobalStatus {
   is_trained: boolean;
+  is_active: boolean;
   total_sku: number;
   last_status: string;
   model_info: {
@@ -105,80 +104,109 @@ export default function Dashboard() {
   const [serverStatus, setServerStatus] = useState<GlobalStatus | null>(null);
 
   const eventSourceRef = useRef<EventSource | null>(null);
+  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  const reconnectProgressStream = useCallback(() => {
+  const cleanupConnections = useCallback(() => {
     if (eventSourceRef.current) {
       eventSourceRef.current.close();
+      eventSourceRef.current = null;
     }
+    if (reconnectTimeoutRef.current) {
+      clearTimeout(reconnectTimeoutRef.current);
+      reconnectTimeoutRef.current = null;
+    }
+  }, []);
+
+  const checkServerStatus = useCallback(async () => {
+    if (isStopping) return;
+
+    try {
+      const res = await axios.get<GlobalStatus>(
+        `${API_BASE}/check-status?t=${Date.now()}`
+      );
+      const statusData = res.data;
+      setTrained(!!statusData.is_trained);
+      setServerStatus(statusData);
+
+      if (statusData.is_active) {
+        setOpenUpload(true);
+        setIsUploading(true);
+        setTrainingStatus(statusData.last_status);
+        if (!eventSourceRef.current) {
+          reconnectProgressStream();
+        }
+      } else {
+        if (isUploading && !isStopping) {
+          setIsUploading(false);
+          setOpenUpload(false);
+          setUploadProgress(0);
+          cleanupConnections();
+        }
+      }
+    } catch {
+      console.log("Backend offline");
+    }
+  }, [isUploading, isStopping, cleanupConnections]);
+
+  const reconnectProgressStream = useCallback(() => {
+    if (isStopping) return;
+    cleanupConnections();
 
     const eventSource = new EventSource(`${API_BASE}/train-progress`);
     eventSourceRef.current = eventSource;
 
     eventSource.onmessage = (event) => {
-      const result = JSON.parse(event.data);
-      setUploadProgress(result.percent);
-      setTrainingStatus(result.status);
+      try {
+        const result = JSON.parse(event.data);
+        const statusLower = (result.status || "").toLowerCase();
 
-      if (result.percent >= 100) {
-        eventSource.close();
-        setTrained(true);
-        setIsUploading(false);
-        checkServerStatus();
-        toast.success("Training Selesai!");
-        setTimeout(() => setOpenUpload(false), 1500);
-      }
+        if (
+          statusLower === "ready" ||
+          statusLower.includes("berhenti") ||
+          statusLower.includes("stopped") ||
+          statusLower.includes("error")
+        ) {
+          cleanupConnections();
+          if (!isStopping) {
+            setIsUploading(false);
+            setOpenUpload(false);
+            setUploadProgress(0);
+            setTrainingStatus("");
+            checkServerStatus();
+          }
+          return;
+        }
 
-      if (result.status === "Training dihentikan") {
-        eventSource.close();
-        setIsUploading(false);
-        setTrained(false);
-        setOpenUpload(false);
+        setUploadProgress(result.percent);
+        setTrainingStatus(result.status);
+
+        if (result.percent >= 100) {
+          cleanupConnections();
+          setTrained(true);
+          setIsUploading(false);
+          checkServerStatus();
+          toast.success("Training Selesai!");
+          setTimeout(() => setOpenUpload(false), 1500);
+        }
+      } catch (e) {
+        console.error("Error parsing progress:", e);
       }
     };
 
     eventSource.onerror = () => {
-      eventSource.close();
-    };
-  }, []);
-
-  const checkServerStatus = useCallback(async () => {
-    try {
-      const res = await axios.get<GlobalStatus>(
-        `${API_BASE}/check-status?t=${Date.now()}`
-      );
-
-      const statusData = res.data;
-      setTrained(!!statusData.is_trained);
-      setServerStatus(statusData);
-
-      const statusLower = statusData.last_status?.toLowerCase() || "";
-      const isStillTraining =
-        !statusData.is_trained &&
-        statusLower !== "belum ada data" &&
-        statusLower !== "selesai" &&
-        statusLower !== "training dihentikan" &&
-        statusLower !== "" &&
-        statusData.total_sku >= 0;
-
-      if (isStillTraining) {
-        setOpenUpload(true);
-        setIsUploading(true);
-        setTrainingStatus(statusData.last_status);
-        reconnectProgressStream();
+      cleanupConnections();
+      if (isUploading && !isStopping) {
+        reconnectTimeoutRef.current = setTimeout(() => {
+          reconnectProgressStream();
+        }, 3000);
       }
-    } catch {
-      console.log("Backend offline");
-    }
-  }, [reconnectProgressStream]);
+    };
+  }, [isUploading, isStopping, checkServerStatus, cleanupConnections]);
 
   useEffect(() => {
     checkServerStatus();
-    return () => {
-      if (eventSourceRef.current) {
-        eventSourceRef.current.close();
-      }
-    };
-  }, [checkServerStatus]);
+    return () => cleanupConnections();
+  }, []);
 
   const handleResetClick = () => {
     setOpenResetDialog(true);
@@ -203,9 +231,24 @@ export default function Dashboard() {
   const handleStopTraining = async () => {
     if (isStopping) return;
     setIsStopping(true);
+    cleanupConnections();
+    setTrainingStatus("Menghentikan proses...");
+
     try {
       await axios.post(`${API_BASE}/stop-training`);
-      toast.success("Permintaan penghentian dikirim");
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+
+      setIsUploading(false);
+      setOpenUpload(false);
+      setUploadProgress(0);
+      setTrainingStatus("");
+      toast.success("Training dihentikan");
+
+      const res = await axios.get<GlobalStatus>(
+        `${API_BASE}/check-status?t=${Date.now()}`
+      );
+      setServerStatus(res.data);
+      setTrained(!!res.data.is_trained);
     } catch {
       toast.error("Gagal menghentikan training");
     } finally {
@@ -215,23 +258,26 @@ export default function Dashboard() {
 
   const handleUploadAndTrain = async () => {
     if (!selectedFile) return toast.error("Pilih file CSV");
+
     setIsUploading(true);
-    setUploadProgress(0);
-    setTrainingStatus("Inisialisasi...");
+    setOpenUpload(true);
+    setUploadProgress(1);
+    setTrainingStatus("Mengunggah data...");
 
     const formData = new FormData();
     formData.append("file", selectedFile);
 
     try {
-      reconnectProgressStream();
       await axios.post(
         `${API_BASE}/upload-train?model_type=${modelType}`,
         formData
       );
+      reconnectProgressStream();
     } catch {
       setIsUploading(false);
-      if (eventSourceRef.current) eventSourceRef.current.close();
-      toast.error("Gagal training");
+      setOpenUpload(false);
+      cleanupConnections();
+      toast.error("Gagal memulai training");
     }
   };
 
@@ -308,13 +354,12 @@ export default function Dashboard() {
       <div className="relative z-10 flex-1 flex items-center justify-center">
         <div className="max-w-5xl w-full grid grid-cols-1 md:grid-cols-2 gap-10">
           <div
-            onClick={() => setOpenUpload(true)}
+            onClick={() => !isUploading && setOpenUpload(true)}
             className={`group relative bg-white/80 backdrop-blur-sm rounded-3xl p-12 shadow-2xl border border-white/50 text-center cursor-pointer transition-all duration-500 hover:scale-105 hover:shadow-orange-200/50 ${
-              isUploading ? "opacity-50" : ""
+              isUploading ? "opacity-50 pointer-events-none" : ""
             }`}
           >
             <div className="absolute inset-0 bg-gradient-to-br from-orange-400/10 to-pink-400/10 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-
             <div className="relative">
               <div className="bg-gradient-to-br from-orange-100 to-orange-50 w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-8 group-hover:scale-110 transition-transform duration-500 shadow-lg shadow-orange-200/50">
                 <CloudUpload
@@ -323,7 +368,6 @@ export default function Dashboard() {
                   strokeWidth={2.5}
                 />
               </div>
-
               <div className="space-y-2">
                 <h2 className="text-3xl font-black text-gray-900">
                   Upload & Train
@@ -332,7 +376,6 @@ export default function Dashboard() {
                   Upload dataset dan latih model AI
                 </p>
               </div>
-
               {isTrained && (
                 <div
                   onClick={(e) => {
@@ -358,7 +401,6 @@ export default function Dashboard() {
             }`}
           >
             <div className="absolute inset-0 bg-gradient-to-br from-blue-400/10 to-purple-400/10 rounded-3xl opacity-0 group-hover:opacity-100 transition-opacity duration-500"></div>
-
             <div className="relative">
               <div className="bg-gradient-to-br from-blue-100 to-blue-50 w-24 h-24 rounded-3xl flex items-center justify-center mx-auto mb-8 group-hover:scale-110 transition-transform duration-500 shadow-lg shadow-blue-200/50">
                 <MessageCircle
@@ -367,7 +409,6 @@ export default function Dashboard() {
                   strokeWidth={2.5}
                 />
               </div>
-
               <div className="space-y-2">
                 <h2 className="text-3xl font-black text-gray-900">
                   Consultant Chat
@@ -397,39 +438,31 @@ export default function Dashboard() {
                 </p>
               </div>
             </div>
-
             <div className="bg-red-50 border-2 border-red-100 rounded-2xl p-5 mb-6">
               <p className="text-gray-700 font-semibold text-base leading-relaxed">
                 Apakah Anda yakin ingin menghapus semua dataset dan model yang
-                telah dilatih? Semua data dan progress akan hilang secara
-                permanen.
+                telah dilatih?
               </p>
             </div>
-
             <div className="flex gap-3">
               <button
                 onClick={() => setOpenResetDialog(false)}
                 disabled={isResetting}
-                className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-2xl font-bold hover:bg-gray-200 transition-all duration-300 disabled:opacity-50"
+                className="flex-1 py-4 bg-gray-100 text-gray-700 rounded-2xl font-bold hover:bg-gray-200 transition-all duration-300"
               >
                 Batal
               </button>
               <button
                 onClick={handleResetConfirm}
                 disabled={isResetting}
-                className="flex-1 py-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-2xl font-bold hover:from-red-600 hover:to-red-700 transition-all duration-300 disabled:opacity-50 shadow-lg shadow-red-200/50 flex items-center justify-center gap-2"
+                className="flex-1 py-4 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-2xl font-bold flex items-center justify-center gap-2"
               >
                 {isResetting ? (
-                  <>
-                    <Loader2 size={20} className="animate-spin" />
-                    <span>Menghapus...</span>
-                  </>
+                  <Loader2 size={20} className="animate-spin" />
                 ) : (
-                  <>
-                    <Trash2 size={20} />
-                    <span>Ya, Hapus</span>
-                  </>
+                  <Trash2 size={20} />
                 )}
+                <span>Ya, Hapus</span>
               </button>
             </div>
           </div>
@@ -458,7 +491,6 @@ export default function Dashboard() {
                 <X size={24} />
               </button>
             </div>
-
             <div className="p-10 space-y-8">
               <div className="grid grid-cols-2 gap-6">
                 <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
@@ -467,30 +499,11 @@ export default function Dashboard() {
                   </p>
                   <div className="flex items-end gap-2">
                     <span className="text-4xl font-black text-slate-800">
-                      {serverStatus.model_info.selected_model}
+                      {serverStatus.model_info.selected_model || "SARIMA"}
                     </span>
                     <span className="text-slate-400 font-bold mb-1">Model</span>
                   </div>
-                  <div className="mt-4 flex flex-col gap-2">
-                    <div className="flex justify-between text-sm">
-                      <span className="text-slate-500 font-medium">Order:</span>
-                      <span className="text-slate-800 font-bold">
-                        {serverStatus.model_info.order}
-                      </span>
-                    </div>
-                    {serverStatus.model_info.seasonal_order && (
-                      <div className="flex justify-between text-sm">
-                        <span className="text-slate-500 font-medium">
-                          Seasonal:
-                        </span>
-                        <span className="text-slate-800 font-bold">
-                          {serverStatus.model_info.seasonal_order}
-                        </span>
-                      </div>
-                    )}
-                  </div>
                 </div>
-
                 <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100">
                   <p className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">
                     Cakupan Data
@@ -501,75 +514,7 @@ export default function Dashboard() {
                     </span>
                     <span className="text-blue-400 font-bold mb-1">SKU</span>
                   </div>
-                  <div className="mt-4 space-y-2">
-                    <div className="h-2 bg-blue-200 rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-blue-600 rounded-full"
-                        style={{
-                          width: `${
-                            (serverStatus.summary.success /
-                              serverStatus.total_sku) *
-                            100
-                          }%`,
-                        }}
-                      ></div>
-                    </div>
-                    <p className="text-[10px] text-blue-500 font-bold text-right uppercase">
-                      Training Success Rate
-                    </p>
-                  </div>
                 </div>
-              </div>
-
-              <div>
-                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
-                  <Target size={14} /> Evaluasi Akurasi Global
-                </p>
-                <div className="grid grid-cols-3 gap-4">
-                  {[
-                    {
-                      label: "MAE",
-                      value: serverStatus.global_evaluation.mae,
-                      desc: "Mean Abs Error",
-                    },
-                    {
-                      label: "RMSE",
-                      value: serverStatus.global_evaluation.rmse,
-                      desc: "Root Mean Sq Error",
-                    },
-                    {
-                      label: "MAPE",
-                      value: serverStatus.global_evaluation.mape,
-                      desc: "Mean Abs % Error",
-                    },
-                  ].map((stat, i) => (
-                    <div
-                      key={i}
-                      className="text-center p-5 bg-white border-2 border-slate-50 rounded-3xl shadow-sm"
-                    >
-                      <p className="text-[10px] font-black text-slate-400 mb-1">
-                        {stat.label}
-                      </p>
-                      <p className="text-xl font-black text-slate-800">
-                        {stat.value ?? "N/A"}
-                      </p>
-                      <p className="text-[9px] text-slate-400 font-bold mt-1 uppercase">
-                        {stat.desc}
-                      </p>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="bg-orange-50 p-5 rounded-2xl flex items-start gap-4 border border-orange-100">
-                <div className="p-2 bg-orange-100 rounded-lg text-orange-600 mt-1">
-                  <Sparkles size={18} />
-                </div>
-                <p className="text-xs text-orange-800 font-medium leading-relaxed">
-                  Model ini dilatih secara individual untuk setiap SKU guna
-                  menangkap pola musiman dan tren unik setiap produk. Akurasi
-                  dihitung berdasarkan <b>validation set</b> terakhir.
-                </p>
               </div>
             </div>
           </div>
@@ -588,7 +533,7 @@ export default function Dashboard() {
                   Konfigurasi AI
                 </h3>
               </div>
-              {!isUploading && (
+              {!isUploading && !isStopping && (
                 <button
                   onClick={() => setOpenUpload(false)}
                   className="p-2 hover:bg-gray-100 rounded-xl transition-colors"
@@ -610,10 +555,12 @@ export default function Dashboard() {
                   </div>
                 </div>
                 <p className="font-bold text-orange-600 text-lg">
-                  {trainingStatus}
+                  {trainingStatus || "Memproses..."}
                 </p>
                 <p className="text-xs text-gray-400 mt-4 animate-pulse italic mb-8">
-                  Sedang melanjutkan proses di server...
+                  {isStopping
+                    ? "Mohon tunggu sejenak..."
+                    : "Sedang melanjutkan proses di server..."}
                 </p>
                 <button
                   onClick={handleStopTraining}
@@ -643,23 +590,9 @@ export default function Dashboard() {
                     </p>
                   </div>
                 </div>
-
-                <div className="bg-slate-50 p-6 rounded-2xl flex items-start gap-4 border border-slate-100 text-left">
-                  <div className="p-2 bg-blue-100 rounded-xl text-blue-600 mt-0.5 shadow-sm">
-                    <span className="p-2 bg-blue-100 rounded-xl text-blue-600 mt-0.5 shadow-sm">
-                      <Info size={18} />
-                    </span>
-                  </div>
-                  <p className="text-xs text-slate-600 font-bold leading-relaxed">
-                    Jika ingin menggunakan dataset baru, silakan gunakan tombol{" "}
-                    <span className="text-red-500">{"Reset Data"}</span> di
-                    halaman utama terlebih dahulu untuk membersihkan model lama.
-                  </p>
-                </div>
-
                 <button
                   onClick={() => setOpenUpload(false)}
-                  className="w-full py-5 bg-gradient-to-r from-slate-800 to-gray-900 text-white rounded-2xl font-black text-lg shadow-xl shadow-gray-200 hover:scale-[1.02] transition-all duration-300"
+                  className="w-full py-5 bg-gradient-to-r from-slate-800 to-gray-900 text-white rounded-2xl font-black text-lg shadow-xl shadow-gray-200"
                 >
                   TUTUP JENDELA
                 </button>
@@ -677,8 +610,8 @@ export default function Dashboard() {
                         onClick={() => setModelType(t)}
                         className={`flex-1 py-4 rounded-2xl font-bold transition-all duration-300 ${
                           modelType === t
-                            ? "bg-gradient-to-r from-orange-500 to-pink-500 text-white shadow-lg shadow-orange-200/50 scale-105"
-                            : "bg-gray-100 text-gray-500 hover:bg-gray-200"
+                            ? "bg-gradient-to-r from-orange-500 to-pink-500 text-white shadow-lg"
+                            : "bg-gray-100 text-gray-500"
                         }`}
                       >
                         {t}
@@ -686,17 +619,16 @@ export default function Dashboard() {
                     ))}
                   </div>
                 </div>
-
                 <div>
                   <label className="block text-sm font-bold text-gray-700 mb-3">
                     Dataset
                   </label>
                   <label className="block p-12 border-2 border-dashed border-gray-300 rounded-2xl text-center cursor-pointer hover:border-orange-400 hover:bg-orange-50/50 transition-all duration-300 group">
                     <FileText
-                      className="mx-auto text-gray-400 mb-3 group-hover:text-orange-500 group-hover:scale-110 transition-all"
+                      className="mx-auto text-gray-400 mb-3 group-hover:text-orange-500 transition-all"
                       size={40}
                     />
-                    <span className="text-sm font-semibold text-gray-600 group-hover:text-orange-600">
+                    <span className="text-sm font-semibold text-gray-600">
                       {selectedFile
                         ? selectedFile.name
                         : "Klik untuk pilih CSV"}
@@ -711,10 +643,9 @@ export default function Dashboard() {
                     />
                   </label>
                 </div>
-
                 <button
                   onClick={handleUploadAndTrain}
-                  className="w-full py-5 bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-2xl font-black text-lg shadow-xl shadow-orange-200/50 hover:shadow-2xl hover:scale-105 transition-all duration-300"
+                  className="w-full py-5 bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-2xl font-black text-lg shadow-xl"
                 >
                   MULAI TRAINING
                 </button>
@@ -727,14 +658,14 @@ export default function Dashboard() {
       {openChat && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-lg flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-3xl max-w-6xl w-full h-[92vh] flex flex-col shadow-2xl overflow-hidden animate-in zoom-in duration-300">
-            <div className="p-6 border-b flex justify-between items-center bg-gradient-to-r from-blue-600 to-purple-600">
+            <div className="p-6 border-b flex justify-between items-center bg-gradient-to-r from-blue-600 to-purple-600 text-white">
               <div className="flex items-center gap-4">
                 <div className="p-3 bg-white/20 backdrop-blur-sm rounded-2xl">
-                  <BarChart3 className="text-white" size={28} />
+                  <BarChart3 size={28} />
                 </div>
                 <div>
-                  <h3 className="font-black text-2xl text-white">AI ENGINE</h3>
-                  <p className="text-blue-100 text-sm font-medium">
+                  <h3 className="font-black text-2xl">AI ENGINE</h3>
+                  <p className="text-blue-100 text-sm">
                     Intelligent Stock Analytics
                   </p>
                 </div>
@@ -743,125 +674,37 @@ export default function Dashboard() {
                 onClick={() => setOpenChat(false)}
                 className="p-2 hover:bg-white/10 rounded-xl transition-colors"
               >
-                <X className="text-white" size={28} />
+                <X size={28} />
               </button>
             </div>
-
             <div className="flex-1 overflow-y-auto p-8 bg-gradient-to-br from-slate-50 to-blue-50 space-y-8">
               {chatHistory.length === 0 ? (
                 <div className="h-full flex flex-col items-center justify-center text-gray-400">
-                  <div className="relative mb-6">
-                    <MessageCircle size={80} className="opacity-20" />
-                    <Sparkles
-                      className="absolute -top-2 -right-2 text-blue-400 animate-pulse"
-                      size={24}
-                    />
-                  </div>
+                  <MessageCircle size={80} className="opacity-20 mb-4" />
                   <p className="font-bold text-lg">Belum ada percakapan</p>
-                  <p className="text-sm mt-2">
-                    Mulai dengan menanyakan analisis stok Anda
-                  </p>
                 </div>
               ) : (
                 chatHistory.map((item, idx) => (
-                  <div
-                    key={idx}
-                    className="space-y-6 animate-in slide-in-from-bottom duration-500"
-                  >
+                  <div key={idx} className="space-y-6">
                     <div className="flex justify-end">
-                      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-7 py-4 rounded-3xl rounded-tr-md font-semibold shadow-lg shadow-blue-200/50 max-w-2xl">
+                      <div className="bg-gradient-to-r from-blue-600 to-purple-600 text-white px-7 py-4 rounded-3xl rounded-tr-md font-semibold max-w-2xl">
                         {item.userQuery}
                       </div>
                     </div>
-
                     {item.message && (
                       <div className="flex justify-start">
-                        <div className="bg-white border-2 border-gray-100 p-7 rounded-3xl rounded-tl-md text-gray-700 font-medium max-w-3xl shadow-xl">
+                        <div className="bg-white border-2 border-gray-100 p-7 rounded-3xl rounded-tl-md text-gray-700 font-medium max-w-3xl shadow-sm">
                           {item.message}
-
-                          {item.summary && (
-                            <div className="mt-6 grid grid-cols-3 gap-4 border-t-2 border-gray-100 pt-6">
-                              <div className="text-center bg-gradient-to-br from-orange-50 to-pink-50 p-4 rounded-2xl">
-                                <p className="text-xs text-gray-500 uppercase font-bold mb-2">
-                                  Terjual
-                                </p>
-                                <p className="text-orange-600 font-black text-2xl">
-                                  {item.summary.total_terjual}
-                                </p>
-                              </div>
-                              <div className="text-center bg-gradient-to-br from-blue-50 to-purple-50 p-4 rounded-2xl">
-                                <p className="text-xs text-gray-500 uppercase font-bold mb-2">
-                                  Omzet
-                                </p>
-                                <p className="text-blue-600 font-black text-2xl">
-                                  {item.summary.omzet}
-                                </p>
-                              </div>
-                              <div className="text-center bg-gradient-to-br from-green-50 to-teal-50 p-4 rounded-2xl">
-                                <p className="text-xs text-gray-500 uppercase font-bold mb-2">
-                                  SKU
-                                </p>
-                                <p className="text-green-600 font-black text-2xl">
-                                  {item.summary.produk_unik}
-                                </p>
-                              </div>
-                            </div>
-                          )}
                         </div>
                       </div>
                     )}
-
                     {item.charts?.map((c, i) => (
                       <ChartRenderer key={i} {...c} />
                     ))}
-
-                    {item.data && (
-                      <div className="bg-white rounded-3xl border-2 border-gray-100 overflow-hidden shadow-xl">
-                        <table className="w-full text-left">
-                          <thead className="bg-gradient-to-r from-gray-50 to-blue-50 text-xs uppercase font-black text-gray-600">
-                            <tr>
-                              <th className="px-8 py-5">SKU Identifier</th>
-                              <th className="px-8 py-5">Product Name</th>
-                              <th className="px-8 py-5 text-center">
-                                Quantity
-                              </th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-gray-100">
-                            {item.data.map((row: TableData, i: number) => (
-                              <tr
-                                key={i}
-                                className="hover:bg-blue-50/50 transition-colors duration-200"
-                              >
-                                <td className="px-8 py-6 font-mono text-sm text-gray-500 font-semibold">
-                                  {row.sku}
-                                </td>
-                                <td className="px-8 py-6 font-bold text-gray-900 text-base leading-tight">
-                                  {row.produk || row.nama_produk}
-                                  {row.variasi && row.variasi !== "-" && (
-                                    <span className="block text-xs text-gray-500 font-medium mt-1">
-                                      VAR: {row.variasi}
-                                    </span>
-                                  )}
-                                </td>
-                                <td className="px-8 py-6 text-center">
-                                  <div className="inline-flex items-center justify-center bg-gradient-to-r from-orange-500 to-pink-500 text-white rounded-full px-6 py-2 shadow-lg shadow-orange-200/50 min-w-[120px]">
-                                    <span className="text-sm font-black whitespace-nowrap">
-                                      {row.total || row.prediksi_7_hari} UNITS
-                                    </span>
-                                  </div>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
                   </div>
                 ))
               )}
             </div>
-
             <div className="p-6 bg-white border-t-2 border-gray-100">
               <div className="flex gap-4 max-w-4xl mx-auto">
                 <input
@@ -871,12 +714,12 @@ export default function Dashboard() {
                   onKeyDown={(e) => e.key === "Enter" && sendChatMessage()}
                   placeholder="Tanyakan tren stok produk..."
                   disabled={isSendingChat}
-                  className="flex-1 bg-gray-50 border-2 border-gray-200 rounded-2xl px-7 py-5 focus:ring-4 focus:ring-blue-200 focus:border-blue-500 outline-none font-semibold disabled:opacity-50 transition-all"
+                  className="flex-1 bg-gray-50 border-2 border-gray-200 rounded-2xl px-7 py-5 focus:border-blue-500 outline-none font-semibold disabled:opacity-50"
                 />
                 <button
                   onClick={sendChatMessage}
                   disabled={!chatInput.trim() || isSendingChat}
-                  className="bg-gradient-to-r from-orange-500 to-pink-500 text-white p-5 rounded-2xl shadow-xl shadow-orange-200/50 hover:scale-110 transition-all duration-300 disabled:opacity-50 disabled:hover:scale-100 flex items-center justify-center min-w-[70px]"
+                  className="bg-gradient-to-r from-orange-500 to-pink-500 text-white p-5 rounded-2xl shadow-xl flex items-center justify-center min-w-[70px]"
                 >
                   {isSendingChat ? (
                     <Loader2 className="animate-spin" size={28} />
