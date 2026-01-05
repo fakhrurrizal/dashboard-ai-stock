@@ -142,11 +142,13 @@ export default function Dashboard() {
       setTrained(!!statusData.is_trained);
       setServerStatus(statusData);
 
+      const statusLower = statusData.last_status?.toLowerCase() || "";
       const isStillTraining =
         !statusData.is_trained &&
-        statusData.last_status !== "Belum ada data" &&
-        statusData.last_status !== "Selesai" &&
-        statusData.last_status !== "";
+        statusLower !== "belum ada data" &&
+        statusLower !== "selesai" &&
+        statusLower !== "" &&
+        statusData.total_sku >= 0;
 
       if (isStillTraining) {
         setOpenUpload(true);
