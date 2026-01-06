@@ -10,7 +10,9 @@ import {
   Loader2,
   MessageCircle,
   Send,
+  Sparkles,
   Square,
+  Target,
   Trash2,
   X,
   Zap,
@@ -69,6 +71,7 @@ interface GlobalStatus {
   is_active: boolean;
   total_sku: number;
   last_status: string;
+  total_rows?: number;
   model_info: {
     selected_model: string | null;
     order: string;
@@ -491,6 +494,7 @@ export default function Dashboard() {
                 <X size={24} />
               </button>
             </div>
+
             <div className="p-10 space-y-8">
               <div className="grid grid-cols-2 gap-6">
                 <div className="bg-slate-50 p-6 rounded-[2rem] border border-slate-100">
@@ -503,7 +507,26 @@ export default function Dashboard() {
                     </span>
                     <span className="text-slate-400 font-bold mb-1">Model</span>
                   </div>
+                  <div className="mt-4 flex flex-col gap-2">
+                    <div className="flex justify-between text-sm">
+                      <span className="text-slate-500 font-medium">Order:</span>
+                      <span className="text-slate-800 font-bold">
+                        {serverStatus.model_info.order}
+                      </span>
+                    </div>
+                    {serverStatus.model_info.seasonal_order && (
+                      <div className="flex justify-between text-sm">
+                        <span className="text-slate-500 font-medium">
+                          Seasonal:
+                        </span>
+                        <span className="text-slate-800 font-bold">
+                          {serverStatus.model_info.seasonal_order}
+                        </span>
+                      </div>
+                    )}
+                  </div>
                 </div>
+
                 <div className="bg-blue-50 p-6 rounded-[2rem] border border-blue-100">
                   <p className="text-xs font-black text-blue-400 uppercase tracking-widest mb-4">
                     Cakupan Data
@@ -514,13 +537,95 @@ export default function Dashboard() {
                     </span>
                     <span className="text-blue-400 font-bold mb-1">SKU</span>
                   </div>
+                  <div className="mt-4 space-y-2">
+                    <div className="h-2 bg-blue-200 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-blue-600 rounded-full"
+                        style={{
+                          width: `${
+                            serverStatus.total_sku > 0
+                              ? (serverStatus.summary.success /
+                                  serverStatus.total_sku) *
+                                100
+                              : 0
+                          }%`,
+                        }}
+                      ></div>
+                    </div>
+                    <p className="text-[10px] text-blue-500 font-bold text-right uppercase">
+                      Training Success Rate
+                    </p>
+                  </div>
                 </div>
+              </div>
+              <div className="bg-orange-50 p-2 rounded-[2.5rem] border border-orange-100 text-center col-span-2 shadow-sm ring-1 ring-orange-200/50">
+                <p className="text-[11px] font-black text-orange-400 uppercase tracking-[0.2em] mb-3">
+                  Volume Dataset
+                </p>
+                <p className="text-3xl font-black text-orange-800 tracking-tight">
+                  {serverStatus.total_rows?.toLocaleString() || 0}{" "}
+                  <span className="text-sm font-bold text-orange-400 uppercase">
+                    Rows Data
+                  </span>
+                </p>
+                <p className="text-xs text-orange-600/60 mt-3 font-semibold">
+                  Total baris data yang diproses untuk pelatihan
+                </p>
+              </div>
+              <div>
+                <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-6 flex items-center gap-2">
+                  <Target size={14} /> Evaluasi Akurasi Global
+                </p>
+                <div className="grid grid-cols-3 gap-4">
+                  {[
+                    {
+                      label: "MAE",
+                      value: serverStatus.global_evaluation.mae,
+                      desc: "Mean Abs Error",
+                    },
+                    {
+                      label: "RMSE",
+                      value: serverStatus.global_evaluation.rmse,
+                      desc: "Root Mean Sq Error",
+                    },
+                    {
+                      label: "MAPE",
+                      value: serverStatus.global_evaluation.mape,
+                      desc: "Mean Abs % Error",
+                    },
+                  ].map((stat, i) => (
+                    <div
+                      key={i}
+                      className="text-center p-5 bg-white border-2 border-slate-50 rounded-3xl shadow-sm"
+                    >
+                      <p className="text-[10px] font-black text-slate-400 mb-1">
+                        {stat.label}
+                      </p>
+                      <p className="text-xl font-black text-slate-800">
+                        {stat.value ?? "N/A"}
+                      </p>
+                      <p className="text-[9px] text-slate-400 font-bold mt-1 uppercase">
+                        {stat.desc}
+                      </p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="bg-orange-50 p-5 rounded-2xl flex items-start gap-4 border border-orange-100">
+                <div className="p-2 bg-orange-100 rounded-lg text-orange-600 mt-1">
+                  <Sparkles size={18} />
+                </div>
+                <p className="text-xs text-orange-800 font-medium leading-relaxed">
+                  Model ini dilatih secara individual untuk setiap SKU guna
+                  menangkap pola musiman dan tren unik setiap produk. Akurasi
+                  dihitung berdasarkan <b>validation set</b> terakhir.
+                </p>
               </div>
             </div>
           </div>
         </div>
       )}
-
       {openUpload && (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-md flex items-center justify-center z-50 p-4 animate-in fade-in duration-300">
           <div className="bg-white rounded-3xl max-w-lg w-full p-10 shadow-2xl animate-in zoom-in duration-300">
