@@ -844,8 +844,10 @@ export default function Dashboard() {
                                     {row.urgensi ? (
                                       <span
                                         className={`inline-block px-3 py-1 rounded-full text-[9px] font-black tracking-tight ${
-                                          row.urgensi === "KRITIS"
+                                          row.urgensi === "SANGAT KRITIS"
                                             ? "bg-red-100 text-red-600"
+                                            : row.urgensi === "KRITIS"
+                                            ? "bg-yellow-100 text-yellow-600"
                                             : "bg-green-100 text-green-600"
                                         }`}
                                       >
